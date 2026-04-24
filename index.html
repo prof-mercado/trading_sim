@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Simulation | FIN 2150</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0D2129;-webkit-tap-highlight-color:transparent}
+input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]{-moz-appearance:textfield}
+@keyframes fadeIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.fade-in{animation:fadeIn .4s ease-out both}
+.pulse{animation:pulse 1.5s infinite}
+.slide-up{animation:slideUp .5s ease-out both}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const{useState,useCallback,useMemo}=React;
+const C={forest:"#154734",lima:"#72BF44",cyprus:"#003B49",mist:"#B1E4E3",orient:"#005F83",pebble:"#D6D1CA",shuttle:"#63666A",white:"#FFFFFF",offWhite:"#F7F8FA",dark:"#0D2129",red:"#C0392B",green:"#27AE60",lightGray:"#F0F2F5"};
+
+const STOCKS=["TECH","BANK","ENERGY","RETAIL","HEALTH"];
+const SECTORS={"TECH":"Technology","BANK":"Banking","ENERGY":"Energy","RETAIL":"Retail","HEALTH":"Healthcare"};
+
+const ROUNDS=[
+  {bid:[150,45,80,25,120],ask:[150.10,45.05,80.08,25.04,120.12],chg:["--","--","--","--","--"],chgPct:[0,0,0,0,0]},
+  {bid:[165,44.50,79,25.25,120.50],ask:[165.10,44.55,79.08,25.29,120.62],chg:["+10%","-1%","-1%","+1%","0%"],chgPct:[10,-1,-1,1,0]},
+  {bid:[148.50,49,74,23.50,118],ask:[148.60,49.05,74.08,23.54,118.12],chg:["-10%","+9%","-7%","-6%","-2%"],chgPct:[-10,9,-7,-6,-2]},
+  {bid:[153,47,76,24.50,132],ask:[153.10,47.05,76.08,24.54,132.12],chg:["+2%","+4%","-5%","-2%","+10%"],chgPct:[2,4,-5,-2,10]},
+];
+
+const NEWS=[
+  {headline:"",description:"Study these prices carefully and decide how to allocate your $10,000 starting capital.",color:C.orient},
+  {headline:"BREAKING NEWS: Major tech company beats earnings expectations by 20%. Entire tech sector rallying on positive sentiment!",description:"The market has responded instantly to this earnings announcement. Look closely at how dramatically TECH jumped -- from $150 to $165 in seconds.",color:C.forest},
+  {headline:"BREAKING NEWS: Federal Reserve unexpectedly raises interest rates by 0.5%. Broad market selloff underway! Banking sector benefits from higher rates.",description:"Higher interest rates typically pressure growth stocks while benefiting financial institutions.",color:C.red},
+  {headline:"BREAKING NEWS: FDA approves revolutionary new drug treatment. Healthcare sector surging! Broader market recovering from earlier selloff.",description:"The healthcare sector is experiencing a major rally. This is your final opportunity to adjust your portfolio.",color:C.green},
+];
+
+const DEBRIEFS=[
+  null,
+  {title:"Quick Debrief: The Speed of Information",emhTag:"Semi-Strong Form EMH in Action",items:[
+    {n:"01",t:"Notice the Instant Price Jump",b:"TECH rocketed from $150 to $165 the moment the news hit. There was no gradual climb -- the price adjusted instantly as algorithms reacted faster than humanly possible."},
+    {n:"02",t:"Did Anyone Actually Profit?",b:"By the time you heard the announcement and discussed strategy, the price had already moved. If you bought TECH after hearing the news, you paid $165, not $150."},
+    {n:"03",t:"Semi-Strong Form EMH",b:"This is exactly what the semi-strong form predicts: all public information (like earnings announcements) is instantly reflected in prices. You cannot profit from news that everyone else also has."},
+    {n:"04",t:"The Critical Lesson",b:"The only way to profit from the TECH jump would have been to buy BEFORE the announcement. But that would require inside information (illegal) or pure luck."},
+  ]},
+  {title:"Quick Debrief: Volatility & Emotions",emhTag:"Why Diversification Matters",items:[
+    {n:"01",t:"The Crash",b:"TECH plummeted from $165 to $148, wiping out all gains from Round 1. This is the kind of volatility that causes investors to panic."},
+    {n:"02",t:"The Unexpected Winner",b:"While everything else fell, BANK surged 9%. Higher interest rates mean banks earn more on loans and deposits. Different sectors respond differently to the same macro news."},
+    {n:"03",t:"EMH Connection",b:"If markets are efficient, you cannot predict which sector will win next. The Fed announcement was a surprise -- no amount of analysis could have told you to sell TECH and buy BANK before it happened."},
+    {n:"04",t:"The Emotional Challenge",b:"The ability to remain calm during volatility separates successful investors from unsuccessful ones. Panic selling locks in losses. This is why passive, diversified strategies outperform active trading."},
+  ]},
+  null,
+];
+
+const fmt=n=>"$"+n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,",");
+const fmtInt=n=>"$"+Math.round(n).toLocaleString();
+const pct=n=>(n>=0?"+":"")+n.toFixed(1)+"%";
+
+function App(){
+  const[phase,setPhase]=useState("welcome"); // welcome, round, debrief, results
+  const[group,setGroup]=useState("");
+  const[round,setRound]=useState(0);
+  const[cash,setCash]=useState(10000);
+  const[shares,setShares]=useState([0,0,0,0,0]);
+  const[history,setHistory]=useState([]); // [{round,cash,shares:[...],value}]
+  const[tradeQty,setTradeQty]=useState([0,0,0,0,0]);
+  const[ref1,setRef1]=useState(""); // EMH reflection
+  const[ref2,setRef2]=useState(""); // EMH doubts
+
+  const prices=ROUNDS[round];
+  const portfolioValue=useMemo(()=>{
+    let v=cash;
+    shares.forEach((s,i)=>{v+=s*prices.bid[i];});
+    return v;
+  },[cash,shares,round]);
+
+  const marketReturn=useMemo(()=>{
+    // Buy-and-hold: equal allocation at round 0 ask prices
+    const r0=ROUNDS[0].ask;
+    const r3=ROUNDS[3].bid;
+    const perStock=10000/5;
+    let totalEnd=0;
+    r0.forEach((ask,i)=>{
+      const sh=Math.floor(perStock/ask);
+      totalEnd+=sh*r3[i];
+    });
+    // leftover cash from rounding
+    let leftover=10000;
+    r0.forEach((ask)=>{leftover-=Math.floor((10000/5)/ask)*ask;});
+    return((totalEnd+leftover-10000)/10000)*100;
+  },[]);
+
+  const myReturn=((portfolioValue-10000)/10000)*100;
+
+  const handleBuy=useCallback((idx)=>{
+    const qty=tradeQty[idx];
+    if(qty<=0)return;
+    const cost=qty*prices.ask[idx];
+    if(cost>cash)return;
+    setCash(c=>c-cost);
+    setShares(s=>{const n=[...s];n[idx]+=qty;return n;});
+    setTradeQty(q=>{const n=[...q];n[idx]=0;return n;});
+  },[tradeQty,prices,cash]);
+
+  const handleSell=useCallback((idx)=>{
+    const qty=tradeQty[idx];
+    if(qty<=0||qty>shares[idx])return;
+    const proceeds=qty*prices.bid[idx];
+    setCash(c=>c+proceeds);
+    setShares(s=>{const n=[...s];n[idx]-=qty;return n;});
+    setTradeQty(q=>{const n=[...q];n[idx]=0;return n;});
+  },[tradeQty,prices,shares]);
+
+  const handleBuyMax=useCallback((idx)=>{
+    const maxShares=Math.floor(cash/prices.ask[idx]);
+    if(maxShares<=0)return;
+    setTradeQty(q=>{const n=[...q];n[idx]=maxShares;return n;});
+  },[cash,prices]);
+
+  const handleSellAll=useCallback((idx)=>{
+    if(shares[idx]<=0)return;
+    setTradeQty(q=>{const n=[...q];n[idx]=shares[idx];return n;});
+  },[shares]);
+
+  // Advance to the next round. If the incoming round has breaking news, show the
+  // full-screen news flash first so students feel the market moment before trading.
+  const advanceAfterRound=()=>{
+    if(round<3){
+      const next=round+1;
+      setRound(next);
+      if(NEWS[next]&&NEWS[next].headline){setPhase("news");}
+      else{setPhase("round");}
+    }else{
+      setPhase("results");
+    }
+  };
+
+  const confirmRound=()=>{
+    setHistory(h=>[...h,{round,cash,shares:[...shares],value:portfolioValue}]);
+    // Debrief for THIS round fires AFTER lock-in so students experience the market reaction
+    // before the lesson. If no debrief, advance (which may show a news flash first).
+    if(DEBRIEFS[round]){
+      setPhase("debrief");
+    }else{
+      advanceAfterRound();
+    }
+    setTradeQty([0,0,0,0,0]);
+  };
+
+  const proceedFromDebrief=()=>{advanceAfterRound();};
+
+  const startSim=()=>{
+    if(!group.trim())return;
+    setPhase("round");setRound(0);setCash(10000);setShares([0,0,0,0,0]);setHistory([]);setTradeQty([0,0,0,0,0]);
+  };
+
+  const restart=()=>{
+    setPhase("welcome");setGroup("");setRound(0);setCash(10000);setShares([0,0,0,0,0]);setHistory([]);setTradeQty([0,0,0,0,0]);setRef1("");setRef2("");
+  };
+
+  // ========== WELCOME ==========
+  if(phase==="welcome") return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:"24px",background:C.cyprus}}>
+      <div className="fade-in" style={{maxWidth:"520px",width:"100%",textAlign:"center"}}>
+        <div style={{fontSize:"11px",fontWeight:"bold",letterSpacing:"3px",color:C.lima}}>FIN 2150 | CHAPTER 14</div>
+        <h1 style={{fontSize:"32px",fontWeight:"bold",color:C.white,margin:"12px 0",lineHeight:1.2}}>Trading Simulation</h1>
+        <p style={{fontSize:"14px",color:C.mist,marginBottom:"4px"}}>Market Efficiency & Trading Mechanics</p>
+        <p style={{fontSize:"13px",color:C.pebble,marginBottom:"24px"}}>Can you beat the market?</p>
+        <input type="text" placeholder="Enter your name" value={group} onChange={e=>setGroup(e.target.value)} onKeyDown={e=>e.key==="Enter"&&startSim()} style={{width:"100%",padding:"14px",borderRadius:"8px",textAlign:"center",fontSize:"16px",background:C.forest,border:"2px solid "+C.lima+"40",color:C.white,outline:"none",marginBottom:"12px"}}/>
+        <button onClick={startSim} disabled={!group.trim()} style={{width:"100%",padding:"14px",borderRadius:"8px",fontWeight:"bold",fontSize:"16px",background:C.lima,color:C.forest,border:"none",cursor:"pointer",opacity:group.trim()?1:0.4}}>Begin Trading</button>
+        <div style={{marginTop:"24px",textAlign:"left"}}>
+          {[{icon:"$",title:"Starting Cash: $10,000",desc:"Invest across 5 stocks representing major market sectors."},{icon:"\u21C4",title:"Market Orders Only",desc:"Buy at ASK price (higher). Sell at BID price (lower). The spread is your trading cost."},{icon:"\u2191",title:"Beat the Market",desc:"React to 3 news rounds. Outperform a simple buy-and-hold strategy."}].map((c,i)=>
+            <div key={i} style={{display:"flex",gap:"12px",alignItems:"flex-start",padding:"10px 0",borderTop:i?`1px solid ${C.forest}`:"none"}}>
+              <div style={{width:"32px",height:"32px",borderRadius:"8px",background:C.forest,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold",color:C.lima,fontSize:"16px",flexShrink:0}}>{c.icon}</div>
+              <div><div style={{fontSize:"13px",fontWeight:"bold",color:C.white}}>{c.title}</div><div style={{fontSize:"11px",color:C.mist,marginTop:"2px"}}>{c.desc}</div></div>
+            </div>
+          )}
+        </div>
+        {/* EMH Primer */}
+        <div style={{marginTop:"16px",textAlign:"left",padding:"14px",borderRadius:"10px",background:C.forest,border:"1px solid "+C.lima+"30"}}>
+          <div style={{fontSize:"10px",fontWeight:"bold",letterSpacing:"2px",color:C.lima,marginBottom:"8px"}}>CONCEPT TO TEST</div>
+          <div style={{fontSize:"14px",fontWeight:"bold",color:C.white,marginBottom:"6px"}}>The Efficient Market Hypothesis (EMH)</div>
+          <div style={{fontSize:"12px",color:C.mist,lineHeight:1.5,marginBottom:"10px"}}>EMH states that asset prices fully reflect all available information, making it nearly impossible to consistently outperform the market.</div>
+          <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
+            {[
+              {form:"Weak Form",desc:"Past prices cannot predict future prices. Technical analysis does not work."},
+              {form:"Semi-Strong Form",desc:"All public information is already reflected in prices. Fundamental analysis cannot beat the market."},
+              {form:"Strong Form",desc:"All information (public and private) is reflected. Even insider knowledge is priced in."},
+            ].map((f,i)=>
+              <div key={i} style={{display:"flex",gap:"8px",alignItems:"flex-start"}}>
+                <div style={{fontSize:"10px",fontWeight:"bold",color:C.lima,minWidth:"70px",paddingTop:"1px"}}>{f.form}:</div>
+                <div style={{fontSize:"11px",color:C.pebble}}>{f.desc}</div>
+              </div>
+            )}
+          </div>
+          <div style={{fontSize:"11px",color:C.lima,fontWeight:"bold",marginTop:"10px",fontStyle:"italic"}}>Can you beat the market?</div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ========== NEWS FLASH (full-screen) ==========
+  if(phase==="news"){
+    const n=NEWS[round];
+    if(!n||!n.headline){setPhase("round");return null;}
+    const cleanHeadline=n.headline.replace(/^BREAKING NEWS:\s*/i,"");
+    return(
+      <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:"24px",background:n.color}}>
+        <div className="fade-in" style={{maxWidth:"560px",width:"100%",textAlign:"center"}}>
+          <div className="pulse" style={{fontSize:"12px",fontWeight:"bold",letterSpacing:"4px",color:C.white,marginBottom:"10px",opacity:0.85}}>&#9679; LIVE &#9679;</div>
+          <div style={{fontSize:"13px",fontWeight:"bold",letterSpacing:"3px",color:C.white,marginBottom:"24px",padding:"6px 14px",background:"rgba(255,255,255,0.18)",borderRadius:"4px",display:"inline-block"}}>BREAKING NEWS</div>
+          <div style={{fontSize:"clamp(22px,5vw,30px)",fontWeight:"bold",color:C.white,lineHeight:1.3,marginBottom:"18px"}}>
+            {cleanHeadline}
+          </div>
+          <div style={{fontSize:"15px",color:C.white,opacity:0.9,lineHeight:1.6,marginBottom:"32px"}}>
+            {n.description}
+          </div>
+          <button onClick={()=>setPhase("round")} style={{padding:"14px 28px",borderRadius:"8px",fontWeight:"bold",fontSize:"15px",background:C.white,color:n.color,border:"none",cursor:"pointer",letterSpacing:"0.5px"}}>
+            React to the Market &rarr;
+          </button>
+          <div style={{fontSize:"11px",color:C.white,opacity:0.7,marginTop:"18px"}}>Round {round} of 3</div>
+        </div>
+      </div>
+    );
+  }
+
+  // ========== DEBRIEF ==========
+  if(phase==="debrief"){
+    const db=DEBRIEFS[round];
+    if(!db){setPhase("round");return null;}
+    return(
+      <div style={{minHeight:"100vh",padding:"16px",background:C.offWhite}}>
+        <div style={{maxWidth:"600px",margin:"0 auto"}}>
+          <h2 className="fade-in" style={{fontSize:"22px",fontWeight:"bold",color:C.forest,marginBottom:"4px"}}>{db.title}</h2>
+          {db.emhTag&&<div className="fade-in" style={{display:"inline-block",fontSize:"10px",fontWeight:"bold",letterSpacing:"1px",padding:"3px 10px",borderRadius:"4px",background:C.lima+"25",color:C.forest,marginBottom:"14px"}}>{db.emhTag}</div>}
+          {db.items.map((it,i)=>
+            <div key={i} className="slide-up" style={{animationDelay:i*0.1+"s",padding:"14px",borderRadius:"10px",background:C.white,border:"1px solid "+C.pebble,marginBottom:"10px"}}>
+              <div style={{display:"flex",gap:"10px",alignItems:"flex-start"}}>
+                <span style={{fontWeight:"bold",fontSize:"18px",color:C.lima}}>{it.n}</span>
+                <div><div style={{fontWeight:"bold",fontSize:"14px",color:C.forest,marginBottom:"4px"}}>{it.t}</div><div style={{fontSize:"12px",color:C.shuttle,lineHeight:1.5}}>{it.b}</div></div>
+              </div>
+            </div>
+          )}
+          <button onClick={proceedFromDebrief} style={{width:"100%",marginTop:"12px",padding:"14px",borderRadius:"8px",fontWeight:"bold",fontSize:"15px",background:C.forest,color:C.white,border:"none",cursor:"pointer"}}>{round<3?`Continue to Round ${round+1} Trading →`:"See Final Results →"}</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ========== TRADING ROUND ==========
+  if(phase==="round") return(
+    <div style={{minHeight:"100vh",background:C.offWhite,paddingBottom:"24px"}}>
+      {/* Header */}
+      <div style={{background:C.cyprus,padding:"12px 16px"}}>
+        <div style={{maxWidth:"600px",margin:"0 auto"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span/>{/* trades are locked once a round is confirmed — no back navigation */}
+            <span style={{fontSize:"11px",fontWeight:"bold",letterSpacing:"2px",color:C.lima}}>ROUND {round} OF 3</span>
+            <span style={{fontSize:"11px",color:C.mist}}>{group}</span>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:"8px"}}>
+            <div><div style={{fontSize:"10px",color:C.mist}}>Cash</div><div style={{fontSize:"18px",fontWeight:"bold",color:C.white}}>{fmt(cash)}</div></div>
+            <div style={{textAlign:"right"}}><div style={{fontSize:"10px",color:C.mist}}>Portfolio Value</div><div style={{fontSize:"18px",fontWeight:"bold",color:C.lima}}>{fmt(portfolioValue)}</div></div>
+          </div>
+          <div style={{marginTop:"6px",height:"4px",borderRadius:"2px",background:C.forest}}>
+            <div style={{height:"100%",borderRadius:"2px",background:C.lima,width:`${((round+1)/4)*100}%`,transition:"width 0.5s"}}/>
+          </div>
+        </div>
+      </div>
+
+      <div style={{maxWidth:"600px",margin:"0 auto",padding:"12px 16px"}}>
+        {/* News Banner */}
+        {NEWS[round].headline&&<div className="fade-in" style={{padding:"12px",borderRadius:"8px",background:NEWS[round].color,marginBottom:"12px"}}>
+          <div style={{fontSize:"13px",fontWeight:"bold",color:C.white,lineHeight:1.4}}>{NEWS[round].headline}</div>
+        </div>}
+        <p style={{fontSize:"12px",color:C.shuttle,marginBottom:"16px"}}>{NEWS[round].description}</p>
+
+        {/* Stock Cards */}
+        {STOCKS.map((stock,i)=>{
+          const chgVal=ROUNDS[round].chgPct[i];
+          const chgColor=chgVal>0?C.green:chgVal<0?C.red:C.shuttle;
+          return(
+            <div key={stock} className="slide-up" style={{animationDelay:i*0.06+"s",padding:"14px",borderRadius:"10px",background:C.white,border:"1px solid "+C.pebble,marginBottom:"10px"}}>
+              {/* Stock info row */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px"}}>
+                <div>
+                  <div style={{fontWeight:"bold",fontSize:"15px",color:C.forest}}>{stock}</div>
+                  <div style={{fontSize:"10px",color:C.shuttle}}>{SECTORS[stock]}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <span style={{fontSize:"14px",fontWeight:"bold",color:chgColor}}>{ROUNDS[round].chg[i]}</span>
+                </div>
+              </div>
+              {/* Bid/Ask */}
+              <div style={{display:"flex",gap:"8px",marginBottom:"8px"}}>
+                <div style={{flex:1,padding:"6px",borderRadius:"6px",background:C.lightGray,textAlign:"center"}}>
+                  <div style={{fontSize:"9px",fontWeight:"bold",color:C.shuttle}}>BID</div>
+                  <div style={{fontSize:"14px",fontWeight:"bold",color:C.red}}>{fmt(prices.bid[i])}</div>
+                </div>
+                <div style={{flex:1,padding:"6px",borderRadius:"6px",background:C.lightGray,textAlign:"center"}}>
+                  <div style={{fontSize:"9px",fontWeight:"bold",color:C.shuttle}}>ASK</div>
+                  <div style={{fontSize:"14px",fontWeight:"bold",color:C.green}}>{fmt(prices.ask[i])}</div>
+                </div>
+                <div style={{flex:1,padding:"6px",borderRadius:"6px",background:C.mist+"40",textAlign:"center"}}>
+                  <div style={{fontSize:"9px",fontWeight:"bold",color:C.shuttle}}>HELD</div>
+                  <div style={{fontSize:"14px",fontWeight:"bold",color:C.forest}}>{shares[i]}</div>
+                </div>
+              </div>
+              {/* Trade controls */}
+              <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
+                <div style={{display:"flex",alignItems:"center",flex:1,border:"1px solid "+C.pebble,borderRadius:"6px",overflow:"hidden"}}>
+                  <button onClick={()=>handleBuyMax(i)} style={{padding:"6px 8px",fontSize:"10px",fontWeight:"bold",background:C.lightGray,border:"none",color:C.orient,cursor:"pointer"}}>MAX</button>
+                  <input type="number" min="0" value={tradeQty[i]||""} onChange={e=>{const v=parseInt(e.target.value)||0;setTradeQty(q=>{const n=[...q];n[i]=Math.max(0,v);return n;});}} placeholder="Qty" style={{flex:1,padding:"8px",border:"none",textAlign:"center",fontSize:"14px",outline:"none",minWidth:0}}/>
+                  <button onClick={()=>handleSellAll(i)} style={{padding:"6px 8px",fontSize:"10px",fontWeight:"bold",background:C.lightGray,border:"none",color:C.shuttle,cursor:"pointer"}}>ALL</button>
+                </div>
+                <button onClick={()=>handleBuy(i)} disabled={tradeQty[i]<=0||tradeQty[i]*prices.ask[i]>cash} style={{padding:"8px 14px",borderRadius:"6px",fontWeight:"bold",fontSize:"12px",background:C.green,color:C.white,border:"none",cursor:"pointer",opacity:tradeQty[i]>0&&tradeQty[i]*prices.ask[i]<=cash?1:0.35}}>BUY</button>
+                <button onClick={()=>handleSell(i)} disabled={tradeQty[i]<=0||tradeQty[i]>shares[i]} style={{padding:"8px 14px",borderRadius:"6px",fontWeight:"bold",fontSize:"12px",background:C.red,color:C.white,border:"none",cursor:"pointer",opacity:tradeQty[i]>0&&tradeQty[i]<=shares[i]?1:0.35}}>SELL</button>
+              </div>
+              {tradeQty[i]>0&&<div style={{fontSize:"10px",color:C.shuttle,marginTop:"4px",textAlign:"center"}}>
+                Buy cost: {fmt(tradeQty[i]*prices.ask[i])} | Sell proceeds: {fmt(tradeQty[i]*prices.bid[i])}
+              </div>}
+            </div>
+          );
+        })}
+
+        {/* Holdings summary */}
+        {shares.some(s=>s>0)&&<div style={{padding:"12px",borderRadius:"8px",background:C.mist+"40",marginBottom:"12px"}}>
+          <div style={{fontSize:"11px",fontWeight:"bold",color:C.forest,marginBottom:"6px"}}>CURRENT HOLDINGS</div>
+          {STOCKS.map((s,i)=>shares[i]>0&&<div key={s} style={{display:"flex",justifyContent:"space-between",fontSize:"12px",color:C.shuttle,marginBottom:"3px"}}>
+            <span>{s}: {shares[i]} shares</span><span>{fmt(shares[i]*prices.bid[i])}</span>
+          </div>)}
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:"12px",fontWeight:"bold",color:C.forest,borderTop:"1px solid "+C.pebble,paddingTop:"4px",marginTop:"4px"}}>
+            <span>Cash + Holdings</span><span>{fmt(portfolioValue)}</span>
+          </div>
+        </div>}
+
+        {/* Confirm */}
+        <button onClick={confirmRound} style={{width:"100%",padding:"14px",borderRadius:"8px",fontWeight:"bold",fontSize:"15px",background:C.forest,color:C.white,border:"none",cursor:"pointer"}}>
+          {round<3?"Lock In Trades & Continue":"Calculate Final Results"}
+        </button>
+        {round===0&&!shares.some(s=>s>0)&&<p style={{fontSize:"11px",color:C.red,textAlign:"center",marginTop:"8px"}}>You haven't bought any stocks yet. Allocate your $10,000 before continuing.</p>}
+      </div>
+    </div>
+  );
+
+  // ========== RESULTS ==========
+  if(phase==="results"){
+    const beat=myReturn>marketReturn;
+    let finalValue=cash;
+    shares.forEach((s,i)=>{finalValue+=s*ROUNDS[3].bid[i];});
+
+    return(
+      <div style={{minHeight:"100vh",padding:"16px",background:C.offWhite}}>
+        <div className="fade-in" style={{maxWidth:"600px",margin:"0 auto"}}>
+          {/* Result Header */}
+          <div style={{borderRadius:"12px",overflow:"hidden",border:"2px solid "+C.forest,marginBottom:"16px"}}>
+            <div style={{padding:"20px",textAlign:"center",background:C.cyprus}}>
+              <div style={{fontSize:"11px",fontWeight:"bold",letterSpacing:"3px",color:C.lima}}>FIN 2150 | TRADING SIMULATION</div>
+              <h2 style={{fontSize:"22px",fontWeight:"bold",color:C.white,margin:"6px 0"}}>{group}'s Final Results</h2>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr"}}>
+              <div style={{padding:"16px",textAlign:"center",background:C.forest}}>
+                <div style={{fontSize:"28px",fontWeight:"bold",color:myReturn>=0?C.lima:C.red}}>{pct(myReturn)}</div>
+                <div style={{fontSize:"11px",color:C.mist}}>Your Return</div>
+              </div>
+              <div style={{padding:"16px",textAlign:"center",background:C.orient}}>
+                <div style={{fontSize:"28px",fontWeight:"bold",color:C.white}}>{pct(marketReturn)}</div>
+                <div style={{fontSize:"11px",color:C.mist}}>Market Return</div>
+              </div>
+            </div>
+            <div style={{padding:"14px",textAlign:"center",background:beat?C.lima+"20":C.red+"15"}}>
+              <div style={{fontSize:"16px",fontWeight:"bold",color:beat?C.forest:C.red}}>
+                {beat?"You Beat the Market!":"The Market Beat You."}
+              </div>
+              <div style={{fontSize:"12px",color:C.shuttle,marginTop:"4px"}}>
+                Final Portfolio Value: {fmt(finalValue)} (started with $10,000)
+              </div>
+            </div>
+          </div>
+
+          {/* Key Question */}
+          <div style={{padding:"14px",borderRadius:"10px",background:C.mist+"40",borderLeft:"4px solid "+C.forest,marginBottom:"16px"}}>
+            <div style={{fontSize:"11px",fontWeight:"bold",letterSpacing:"2px",color:C.forest,marginBottom:"4px"}}>THE CRITICAL QUESTION</div>
+            <p style={{fontSize:"13px",color:C.shuttle,lineHeight:1.5}}>
+              {beat?"Congratulations! But was it skill or luck? Could you replicate this performance tomorrow? Next week? Every year for 15 years?":"Don't feel bad -- over 90% of professional fund managers also fail to beat the market over 15-year periods."}
+            </p>
+          </div>
+
+          {/* Three Lessons */}
+          {[
+            {n:"1",t:"Prices Adjust Instantly to Public Information",b:"You witnessed semi-strong form market efficiency. The moment news became public, prices changed immediately."},
+            {n:"2",t:"Beating the Market Consistently Is Extremely Difficult",b:"Over 90% of professional fund managers fail to beat the market over 15-year periods."},
+            {n:"3",t:"Why Index Funds Make Sense for Most Investors",b:"Index funds match the market's return with minimal cost. You don't need to time the market or manage emotions. Historically averages 10% annually."},
+          ].map((l,i)=>
+            <div key={i} className="slide-up" style={{animationDelay:i*0.15+"s",display:"flex",gap:"10px",alignItems:"flex-start",padding:"12px",borderRadius:"8px",background:C.white,border:"1px solid "+C.pebble,marginBottom:"8px"}}>
+              <div style={{width:"28px",height:"28px",borderRadius:"50%",background:C.forest,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold",fontSize:"14px",color:C.white,flexShrink:0}}>{l.n}</div>
+              <div><div style={{fontWeight:"bold",fontSize:"13px",color:C.forest,marginBottom:"2px"}}>{l.t}</div><div style={{fontSize:"11px",color:C.shuttle,lineHeight:1.4}}>{l.b}</div></div>
+            </div>
+          )}
+
+          {/* Round-by-Round */}
+          <div style={{padding:"14px",borderRadius:"10px",background:C.white,border:"1px solid "+C.pebble,marginBottom:"16px"}}>
+            <div style={{fontSize:"11px",fontWeight:"bold",letterSpacing:"2px",color:C.forest,marginBottom:"8px"}}>ROUND-BY-ROUND HISTORY</div>
+            {history.map((h,i)=>
+              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:"12px",padding:"4px 0",borderBottom:i<history.length-1?"1px solid "+C.lightGray:"none"}}>
+                <span style={{color:C.shuttle}}>After Round {h.round}</span>
+                <span style={{fontWeight:"bold",color:C.forest}}>{fmt(h.value)}</span>
+              </div>
+            )}
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:"12px",fontWeight:"bold",padding:"6px 0 0",borderTop:"2px solid "+C.forest,marginTop:"4px",color:C.forest}}>
+              <span>Final Value</span><span>{fmt(finalValue)}</span>
+            </div>
+          </div>
+
+          <button onClick={()=>setPhase("reflection")} style={{width:"100%",padding:"14px",borderRadius:"8px",fontWeight:"bold",fontSize:"15px",background:C.forest,color:C.white,border:"none",cursor:"pointer"}}>Continue to Reflection &rarr;</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ========== REFLECTION ==========
+  if(phase==="reflection"){
+    const canSubmit=ref1.trim().length>=20&&ref2.trim().length>=20;
+    return(
+      <div style={{minHeight:"100vh",padding:"16px",background:C.offWhite}}>
+        <div className="fade-in" style={{maxWidth:"600px",margin:"0 auto"}}>
+          <button onClick={()=>setPhase("results")} style={{fontSize:"13px",color:C.orient,background:"none",border:"none",cursor:"pointer",marginBottom:"12px"}}>&larr; Back to Results</button>
+          <div style={{textAlign:"center",marginBottom:"20px"}}>
+            <div style={{fontSize:"11px",fontWeight:"bold",letterSpacing:"3px",color:C.orient}}>REFLECTION</div>
+            <h2 style={{fontSize:"24px",fontWeight:"bold",color:C.forest,margin:"6px 0"}}>Connect Your Experience to EMH</h2>
+            <p style={{fontSize:"13px",color:C.shuttle}}>Answer both questions thoughtfully. Your responses will appear on your final submission card.</p>
+          </div>
+
+          {/* EMH Reminder */}
+          <div style={{padding:"12px",borderRadius:"8px",background:C.mist+"40",borderLeft:"4px solid "+C.forest,marginBottom:"20px"}}>
+            <div style={{fontSize:"10px",fontWeight:"bold",letterSpacing:"1px",color:C.forest,marginBottom:"4px"}}>REMEMBER</div>
+            <div style={{fontSize:"12px",color:C.shuttle,lineHeight:1.5}}>The <strong style={{color:C.forest}}>Efficient Market Hypothesis</strong> states that asset prices fully reflect all available information. In its <strong style={{color:C.forest}}>semi-strong form</strong>, all publicly available information (news, earnings, Fed announcements) is instantly priced in, making it nearly impossible to profit from public news.</div>
+          </div>
+
+          {/* Question 1 */}
+          <div style={{marginBottom:"20px"}}>
+            <div style={{fontSize:"13px",fontWeight:"bold",color:C.forest,marginBottom:"6px"}}>1. Based on your experience in this simulation, how does the Efficient Market Hypothesis explain your results? Which specific moments illustrated EMH in action?</div>
+            <textarea value={ref1} onChange={e=>setRef1(e.target.value)} placeholder="Reflect on how prices reacted to news, whether you could have profited from public information, and what your results say about market efficiency..." style={{width:"100%",minHeight:"120px",padding:"12px",borderRadius:"8px",border:"2px solid "+(ref1.trim().length>=20?C.lima:C.pebble),fontSize:"13px",fontFamily:"inherit",lineHeight:1.5,resize:"vertical",outline:"none",transition:"border-color 0.3s"}}/>
+            <div style={{fontSize:"10px",color:ref1.trim().length>=20?C.lima:C.shuttle,marginTop:"4px"}}>{ref1.trim().length<20?`Minimum 20 characters (${ref1.trim().length}/20)`:"Good to go"}</div>
+          </div>
+
+          {/* Question 2 */}
+          <div style={{marginBottom:"20px"}}>
+            <div style={{fontSize:"13px",fontWeight:"bold",color:C.forest,marginBottom:"6px"}}>2. Do you have any doubts about EMH? Can you think of real-world situations where markets might NOT be efficient? Explain your reasoning.</div>
+            <textarea value={ref2} onChange={e=>setRef2(e.target.value)} placeholder="Consider events like GameStop (2021), meme stocks, crypto crashes, or behavioral biases like panic selling. Does EMH always hold, or are there exceptions?" style={{width:"100%",minHeight:"120px",padding:"12px",borderRadius:"8px",border:"2px solid "+(ref2.trim().length>=20?C.lima:C.pebble),fontSize:"13px",fontFamily:"inherit",lineHeight:1.5,resize:"vertical",outline:"none",transition:"border-color 0.3s"}}/>
+            <div style={{fontSize:"10px",color:ref2.trim().length>=20?C.lima:C.shuttle,marginTop:"4px"}}>{ref2.trim().length<20?`Minimum 20 characters (${ref2.trim().length}/20)`:"Good to go"}</div>
+          </div>
+
+          <button onClick={()=>setPhase("submission")} disabled={!canSubmit} style={{width:"100%",padding:"14px",borderRadius:"8px",fontWeight:"bold",fontSize:"15px",background:canSubmit?C.forest:C.pebble,color:canSubmit?C.white:C.shuttle,border:"none",cursor:canSubmit?"pointer":"not-allowed"}}>Generate Submission Card &rarr;</button>
+          {!canSubmit&&<p style={{fontSize:"11px",color:C.shuttle,textAlign:"center",marginTop:"8px"}}>Both responses must be at least 20 characters.</p>}
+        </div>
+      </div>
+    );
+  }
+
+  // ========== FINAL SUBMISSION CARD ==========
+  if(phase==="submission"){
+    const beat=myReturn>marketReturn;
+    let finalValue=cash;
+    shares.forEach((s,i)=>{finalValue+=s*ROUNDS[3].bid[i];});
+
+    return(
+      <div style={{minHeight:"100vh",padding:"16px",background:C.offWhite}}>
+        <div className="fade-in" style={{maxWidth:"600px",margin:"0 auto"}}>
+          {/* Full Submission Card */}
+          <div style={{borderRadius:"12px",overflow:"hidden",border:"2px solid "+C.forest,marginBottom:"16px"}}>
+            {/* Header */}
+            <div style={{padding:"16px",textAlign:"center",background:C.cyprus}}>
+              <div style={{fontSize:"10px",fontWeight:"bold",letterSpacing:"3px",color:C.lima}}>FIN 2150 | CHAPTER 14 TRADING SIMULATION</div>
+              <h2 style={{fontSize:"20px",fontWeight:"bold",color:C.white,margin:"6px 0"}}>{group}'s Submission</h2>
+            </div>
+
+            {/* Results Row */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr"}}>
+              <div style={{padding:"12px",textAlign:"center",background:C.forest}}>
+                <div style={{fontSize:"22px",fontWeight:"bold",color:myReturn>=0?C.lima:C.red}}>{pct(myReturn)}</div>
+                <div style={{fontSize:"9px",color:C.mist}}>Your Return</div>
+              </div>
+              <div style={{padding:"12px",textAlign:"center",background:C.orient}}>
+                <div style={{fontSize:"22px",fontWeight:"bold",color:C.white}}>{pct(marketReturn)}</div>
+                <div style={{fontSize:"9px",color:C.mist}}>Market Return</div>
+              </div>
+              <div style={{padding:"12px",textAlign:"center",background:beat?C.lima+"30":C.red+"20"}}>
+                <div style={{fontSize:"22px",fontWeight:"bold",color:beat?C.forest:C.red}}>{beat?"BEAT":"LOST"}</div>
+                <div style={{fontSize:"9px",color:C.shuttle}}>vs. Market</div>
+              </div>
+            </div>
+
+            {/* Round History (compact) */}
+            <div style={{padding:"10px 14px",background:C.white}}>
+              <div style={{fontSize:"9px",fontWeight:"bold",letterSpacing:"1px",color:C.shuttle,marginBottom:"4px"}}>ROUND-BY-ROUND</div>
+              {history.map((h,i)=>
+                <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:"11px",padding:"2px 0",color:C.shuttle}}>
+                  <span>Round {h.round}</span><span style={{fontWeight:"bold",color:C.forest}}>{fmt(h.value)}</span>
+                </div>
+              )}
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:"11px",fontWeight:"bold",padding:"4px 0 0",borderTop:"1px solid "+C.pebble,marginTop:"2px",color:C.forest}}>
+                <span>Final</span><span>{fmt(finalValue)}</span>
+              </div>
+            </div>
+
+            {/* Reflection 1 */}
+            <div style={{padding:"12px 14px",borderTop:"2px solid "+C.forest,background:C.offWhite}}>
+              <div style={{fontSize:"9px",fontWeight:"bold",letterSpacing:"1px",color:C.orient,marginBottom:"4px"}}>REFLECTION 1: EMH AND YOUR RESULTS</div>
+              <div style={{fontSize:"12px",color:C.shuttle,lineHeight:1.5}}>{ref1}</div>
+            </div>
+
+            {/* Reflection 2 */}
+            <div style={{padding:"12px 14px",borderTop:"1px solid "+C.pebble,background:C.offWhite}}>
+              <div style={{fontSize:"9px",fontWeight:"bold",letterSpacing:"1px",color:C.orient,marginBottom:"4px"}}>REFLECTION 2: DOUBTS ABOUT EMH</div>
+              <div style={{fontSize:"12px",color:C.shuttle,lineHeight:1.5}}>{ref2}</div>
+            </div>
+
+            {/* Footer */}
+            <div style={{padding:"8px",textAlign:"center",background:C.forest}}>
+              <span style={{fontSize:"10px",fontWeight:"bold",color:C.lima}}>SCREENSHOT THIS CARD AND SUBMIT TO CANVAS</span>
+            </div>
+          </div>
+
+          <button onClick={()=>setPhase("reflection")} style={{width:"100%",padding:"10px",borderRadius:"8px",fontWeight:"bold",fontSize:"12px",background:C.white,color:C.orient,border:"1px solid "+C.pebble,cursor:"pointer",marginBottom:"8px"}}>Edit Reflections</button>
+          <button onClick={restart} style={{width:"100%",padding:"10px",borderRadius:"8px",fontWeight:"bold",fontSize:"12px",background:C.pebble,color:C.shuttle,border:"none",cursor:"pointer"}}>Start Over</button>
+        </div>
+      </div>
+    );
+  }
+  return null;
+}
+ReactDOM.render(<App/>,document.getElementById("root"));
+</script>
+</body>
+</html>
